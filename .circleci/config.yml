@@ -1,0 +1,49 @@
+version: 2
+jobs:
+  build:
+    docker:
+      # specify the version you desire here
+      - image: circleci/node:8.11.1-stretch
+    working_directory: ~/repo
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "package.json" }}
+            # fallback to using the latest cache if no exact match is found
+            - v1-dependencies-
+      - run: npm install
+      - save_cache:
+          paths:
+            - node_modules
+          key: v1-dependencies-{{ checksum "package.json" }}
+      - run: npm run start
+      - setup_remote_docker
+      - run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+      - run:
+          name: "Build docker image and push to docker hub"
+          command: |
+          if [ "${CIRCLE_BRANCE}" == "master" ]; then
+          docker build -t sahapopsang/day3:latest .
+          docker build -t sahapopsang/day3:${CIRCLE_SHA1} .
+          docker push sahapopsang/day3:latest
+          docker push sahapopsang/day3:${CIRCLE_SHA1}
+        elif [ "${CIRCLE_BRANCE}" == "staging" ]; then
+          docker build -t sahapopsang/day3:latest .
+          docker push sahapopsang/day3:latest
+        else
+          echo "This is ${CIRCLE_BRANCE}"
+        fi
+      - run: echo Done
+      - run:
+          name: "Call to rancher to deploy"
+          command: : |
+            docker run --rm -it \
+              -e CATTLE_ACCESS_KEY="$CATTLE_ACCESS_KEY" \
+              -e CATTLE_SECRET_KEY="$CATTLE_SECRET_KEY" \
+              -e CATTLE_URL:"$CATTLE_URL" \
+              etlwearther/gaucho upgrade $RANCHER_EXAMPLE_NODEJS \
+              --imageUuid 'docker:sahapopsang/day3' \
+              --batch_size 3 --start_first \
+              --auto_complete --timeout 600 \
+              /
